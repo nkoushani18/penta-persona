@@ -92,12 +92,8 @@ class JudgeHandler:
             print(f"[JUDGE] Got response from Ollama (status: {response.status_code})", flush=True)
             
             if response.status_code != 200:
-                return {
-                    "error": f"Ollama API error: {response.status_code}",
-                    "score": 0,
-                    "breakdown": {},
-                    "reasoning": "Failed to get response from judge"
-                }
+                print(f"[JUDGE] Ollama API error: {response.status_code}. Falling back to Gemini...", flush=True)
+                return self._fallback_to_gemini(prompt)
             
             result = response.json()
             judge_output = result.get("response", "")
@@ -110,20 +106,11 @@ class JudgeHandler:
             return parsed
             
         except requests.exceptions.Timeout:
-            return {
-                "error": "⏱️ Ollama took too long to respond (>2 minutes). Your system might be too slow for LLaMA 3.2.",
-                "score": 0,
-                "breakdown": {},
-                "reasoning": "Timeout waiting for judge"
-            }
+            print("[JUDGE] ⏱️ Ollama timed out (>2 minutes). Falling back to Gemini Cloud Judge...", flush=True)
+            return self._fallback_to_gemini(prompt)
         except Exception as e:
-            print(f"[JUDGE] ❌ Error: {str(e)}", flush=True)
-            return {
-                "error": f"Judge error: {str(e)}",
-                "score": 0,
-                "breakdown": {},
-                "reasoning": "Failed to evaluate responses"
-            }
+            print(f"[JUDGE] ❌ Ollama Error: {str(e)}. Falling back to Gemini Cloud Judge...", flush=True)
+            return self._fallback_to_gemini(prompt)
 
     def _fallback_to_gemini(self, prompt: str) -> Dict:
         """Fallback to Gemini if Ollama is not available."""
