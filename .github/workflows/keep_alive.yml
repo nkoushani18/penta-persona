@@ -1,0 +1,22 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    # Pings every 4 minutes to prevent Render free tier from sleeping (sleeps after 5min idle)
+    - cron: '*/4 * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render App
+        run: |
+          echo "Pinging https://penta-persona.onrender.com/ ..."
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" --max-time 30 https://penta-persona.onrender.com/)
+          echo "Response status: $STATUS"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
+            echo "✅ App is alive!"
+          else
+            echo "⚠️ App returned status $STATUS"
+          fi
