@@ -28,6 +28,8 @@ class JudgeHandler:
             if key:
                 self.api_keys.append(key)
         self.current_key_index = 0
+        # Once Ollama fails once, skip it for the rest of the session (ultra-fast fallback)
+        self._ollama_available = None  # None = not yet checked
         
     def check_connection(self) -> bool:
         """Check if Ollama is running and accessible."""
@@ -60,16 +62,24 @@ class JudgeHandler:
                 - intent_match: Whether core intents match
                 - reasoning: Explanation of the score
         """
-        # Check if Ollama is running first
-        print("[JUDGE] Checking Ollama connection...", flush=True)
-        if not self.check_connection():
-            print("[JUDGE] Ollama is not running. Falling back to Gemini Cloud Judge...", flush=True)
-            return self._fallback_to_gemini(prompt)
-        
-        # Construct the judge prompt
+        # Build the prompt first (needed for both Ollama and Gemini fallback)
         prompt = self._create_judge_prompt(
             user_question, ai_response, human_response, persona_name
         )
+
+        # Fast-path: if Ollama already failed once this session, skip directly to Gemini
+        if self._ollama_available is False:
+            print("[JUDGE] Ollama previously unavailable. Going straight to Gemini...", flush=True)
+            return self._fallback_to_gemini(prompt)
+
+        # Check if Ollama is running
+        print("[JUDGE] Checking Ollama connection...", flush=True)
+        if not self.check_connection():
+            print("[JUDGE] Ollama not detected. Switching to Gemini Cloud Judge instantly...", flush=True)
+            self._ollama_available = False  # Never check again this session
+            return self._fallback_to_gemini(prompt)
+
+        self._ollama_available = True
         
         try:
             print(f"[JUDGE] Sending to Ollama LLaMA 3.2... (this may take 10-30 seconds)", flush=True)
@@ -86,7 +96,7 @@ class JudgeHandler:
                         "num_predict": 300,  # Limit response length for faster results
                     }
                 },
-                timeout=120  # Increased to 2 minutes for slower systems
+                timeout=10  # 10s max — if slow, fall back to Gemini immediately
             )
             
             print(f"[JUDGE] Got response from Ollama (status: {response.status_code})", flush=True)
@@ -106,10 +116,12 @@ class JudgeHandler:
             return parsed
             
         except requests.exceptions.Timeout:
-            print("[JUDGE] ⏱️ Ollama timed out (>2 minutes). Falling back to Gemini Cloud Judge...", flush=True)
+            print("[JUDGE] ⏱️ Ollama timed out (>10s). Switching to Gemini instantly...", flush=True)
+            self._ollama_available = False
             return self._fallback_to_gemini(prompt)
         except Exception as e:
-            print(f"[JUDGE] ❌ Ollama Error: {str(e)}. Falling back to Gemini Cloud Judge...", flush=True)
+            print(f"[JUDGE] ❌ Ollama Error: {str(e)}. Switching to Gemini instantly...", flush=True)
+            self._ollama_available = False
             return self._fallback_to_gemini(prompt)
 
     def _fallback_to_gemini(self, prompt: str) -> Dict:
