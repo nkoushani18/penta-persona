@@ -3,8 +3,12 @@ Gemini LLM Handler
 Fast, intelligent persona-based responses using Google Gemini.
 """
 
+import os
 import google.generativeai as genai
 from typing import Dict, Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 # Persona demographic info
@@ -29,11 +33,24 @@ class GeminiHandler:
         'models/gemini-flash-latest',
     ]
     
-    def __init__(self, api_key: str):
-        """Initialize Gemini with API key."""
-        genai.configure(api_key=api_key)
-        
+    def __init__(self, api_key: str = None):
+        """Initialize Gemini with API key(s)."""
+        self.api_keys = []
+        for i in range(1, 5):
+            key = os.environ.get(f"GEMINI_API_KEY_{i}")
+            if key:
+                self.api_keys.append(key)
+                
+        if not self.api_keys:
+            if api_key:
+                self.api_keys.append(api_key)
+            else:
+                self.api_keys.append("AIzaSyAg3zxRqSsYv8W17gwQkmZs-LhL1AOEQUc")
+                
+        self.current_key_index = 0
         self.current_model_index = 0
+        
+        self._init_api()
         self._init_model()
         
         self.generation_config = genai.GenerationConfig(
@@ -41,8 +58,14 @@ class GeminiHandler:
             top_p=0.95,
             max_output_tokens=500,
         )
-        print(f"[LLM] GeminiHandler initialized with {self.MODEL_LIST[self.current_model_index]}", flush=True)
+        print(f"[LLM] GeminiHandler initialized with {len(self.api_keys)} keys and model {self.MODEL_LIST[self.current_model_index]}", flush=True)
     
+    def _init_api(self):
+        """Configure the genai module with current API key."""
+        key = self.api_keys[self.current_key_index]
+        genai.configure(api_key=key)
+        print(f"[LLM] Configured Gemini with API key index {self.current_key_index + 1}/{len(self.api_keys)}", flush=True)
+
     def _init_model(self):
         """Initialize the current model."""
         model_name = self.MODEL_LIST[self.current_model_index]
@@ -50,10 +73,18 @@ class GeminiHandler:
         print(f"[LLM] Using model: {model_name}", flush=True)
     
     def _rotate_model(self):
-        """Switch to the next model in the list."""
-        self.current_model_index = (self.current_model_index + 1) % len(self.MODEL_LIST)
-        self._init_model()
-        print(f"[LLM] Rotated to model index {self.current_model_index}", flush=True)
+        """Switch to the next API key and model."""
+        # Try next key first
+        next_key_index = (self.current_key_index + 1) % len(self.api_keys)
+        
+        # If we wrapped around keys, rotate the model
+        if next_key_index == 0:
+            self.current_model_index = (self.current_model_index + 1) % len(self.MODEL_LIST)
+            self._init_model()
+            
+        self.current_key_index = next_key_index
+        self._init_api()
+        print(f"[LLM] Rotated to key {self.current_key_index + 1} and model index {self.current_model_index}", flush=True)
     
     def _build_persona_context(self, persona: Dict, persona_id: str) -> str:
         """Build context from persona traits AND original Q&A examples."""
@@ -150,9 +181,9 @@ Your reply:"""
             error_str = str(e)
             print(f"[LLM-HANDLER] ERROR: {type(e).__name__}: {error_str}", flush=True)
             
-            # Check for quota/rate limit errors - try rotating model
-            if "429" in error_str or "quota" in error_str.lower() or "rate" in error_str.lower():
-                print(f"[LLM-HANDLER] Quota exceeded! Rotating to next model...", flush=True)
+            # Check for quota/rate limit/403 errors - try rotating key/model
+            if "429" in error_str or "quota" in error_str.lower() or "rate" in error_str.lower() or "403" in error_str:
+                print(f"[LLM-HANDLER] API Error (403/429/Quota)! Rotating to next key/model...", flush=True)
                 self._rotate_model()
                 
                 # Try once more with new model

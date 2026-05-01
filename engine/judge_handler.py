@@ -5,6 +5,8 @@ Interfaces with Ollama LLaMA 3.2 to judge semantic similarity between AI and hum
 
 import requests
 import json
+import os
+import google.generativeai as genai
 from typing import Dict, Optional
 
 
@@ -20,6 +22,12 @@ class JudgeHandler:
         """
         self.ollama_url = ollama_url
         self.model = "llama3.2"  # LLaMA 3.2 model
+        self.api_keys = []
+        for i in range(1, 5):
+            key = os.environ.get(f"GEMINI_API_KEY_{i}")
+            if key:
+                self.api_keys.append(key)
+        self.current_key_index = 0
         
     def check_connection(self) -> bool:
         """Check if Ollama is running and accessible."""
@@ -55,12 +63,8 @@ class JudgeHandler:
         # Check if Ollama is running first
         print("[JUDGE] Checking Ollama connection...", flush=True)
         if not self.check_connection():
-            return {
-                "error": "⚠️ Ollama is not running! Please start it with: ollama serve",
-                "score": 0,
-                "breakdown": {},
-                "reasoning": "Cannot connect to Ollama server at localhost:11434"
-            }
+            print("[JUDGE] Ollama is not running. Falling back to Gemini Cloud Judge...", flush=True)
+            return self._fallback_to_gemini(prompt)
         
         # Construct the judge prompt
         prompt = self._create_judge_prompt(
@@ -120,6 +124,54 @@ class JudgeHandler:
                 "breakdown": {},
                 "reasoning": "Failed to evaluate responses"
             }
+
+    def _fallback_to_gemini(self, prompt: str) -> Dict:
+        """Fallback to Gemini if Ollama is not available."""
+        if not self.api_keys:
+            # Try to use hardcoded key if no env keys are found
+            self.api_keys.append("AIzaSyAg3zxRqSsYv8W17gwQkmZs-LhL1AOEQUc")
+            
+        max_retries = len(self.api_keys)
+        for attempt in range(max_retries):
+            try:
+                key = self.api_keys[self.current_key_index]
+                # Re-configure to prevent global state conflicts
+                genai.configure(api_key=key)
+                # Use gemini-2.5-flash as the fast judge
+                model = genai.GenerativeModel('models/gemini-2.5-flash-lite')
+                
+                print(f"[JUDGE] Sending to Gemini (Key {self.current_key_index + 1})...", flush=True)
+                response = model.generate_content(
+                    prompt,
+                    generation_config=genai.GenerationConfig(
+                        temperature=0.3,
+                        top_p=0.9,
+                        max_output_tokens=300,
+                    )
+                )
+                
+                if response.text:
+                    judge_output = response.text.strip()
+                    parsed = self._parse_judge_output(judge_output)
+                    print(f"[JUDGE] ✅ Gemini Judging complete! Score: {parsed.get('score', 0)}/100", flush=True)
+                    return parsed
+                    
+            except Exception as e:
+                error_str = str(e)
+                print(f"[JUDGE] Gemini fallback error: {error_str}", flush=True)
+                if "429" in error_str or "quota" in error_str.lower() or "rate" in error_str.lower() or "403" in error_str:
+                    print(f"[JUDGE] Rotating Gemini key...", flush=True)
+                    self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+                else:
+                    # Break on non-quota errors
+                    break
+                    
+        return {
+            "error": "All Gemini fallback keys exhausted or failed.",
+            "score": 0,
+            "breakdown": {},
+            "reasoning": "Failed to evaluate using cloud fallback"
+        }
     
     def _create_judge_prompt(
         self, 

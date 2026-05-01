@@ -145,8 +145,8 @@ class ChatHandler:
         else:
             # Check if it's a rate limit error - fall back to templates
             error_msg = result.get("error", "")
-            if "429" in error_msg or "quota" in error_msg.lower() or "rate" in error_msg.lower():
-                print("[LLM] Rate limit hit! Falling back to templates...", flush=True)
+            if "429" in error_msg or "quota" in error_msg.lower() or "rate" in error_msg.lower() or "403" in error_msg:
+                print("[LLM] API Error/Rate limit hit! Falling back to templates...", flush=True)
                 return self._handle_with_templates(user_message, debug)
             
             # For other errors, return the error message
