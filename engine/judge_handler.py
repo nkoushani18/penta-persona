@@ -34,7 +34,7 @@ class JudgeHandler:
     def check_connection(self) -> bool:
         """Check if Ollama is running and accessible."""
         try:
-            response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
+            response = requests.get(f"{self.ollama_url}/api/tags", timeout=2)
             return response.status_code == 200
         except:
             return False
@@ -96,7 +96,7 @@ class JudgeHandler:
                         "num_predict": 300,  # Limit response length for faster results
                     }
                 },
-                timeout=10  # 10s max — if slow, fall back to Gemini immediately
+                timeout=4  # 4s max — if slow, fall back to Gemini immediately
             )
             
             print(f"[JUDGE] Got response from Ollama (status: {response.status_code})", flush=True)
